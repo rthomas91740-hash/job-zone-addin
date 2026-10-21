@@ -176,6 +176,17 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
     return call("Set", { typeName: "AddInData", entity: { id: job.id, addInId: ADDIN_ID, details: d } }).then(function () { return job; });
   }
 
+  // Resize the job's Geotab zone (no-op standalone).
+  function updateZone(job, widthFt) {
+    if (!GEO || !job.zoneId) return Promise.resolve();
+    var pts = zonePoints(job.center, job.shape, widthFt).map(function (p) { return { x: p.lon, y: p.lat }; });
+    return call("Get", { typeName: "Zone", search: { id: job.zoneId } }).then(function (r) {
+      if (!r.length) throw new Error("zone not found in MyGeotab");
+      var zone = r[0]; zone.points = pts;
+      return call("Set", { typeName: "Zone", entity: zone });
+    });
+  }
+
   /* ---------- rendering ---------- */
   var SQUARE_SVG = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="16" height="16" rx="2"/></svg>';
   var HOUSE_SVG = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l8-7 8 7v9H3z"/></svg>';
@@ -229,9 +240,29 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
     box.appendChild(tiles);
     box.appendChild(el("p", "note", "Vehicle, driver, man-hour and inventory tracking come in the next build step."));
 
-    var z = el("div"); z.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    var z = el("div"); z.style.cssText = "display:flex;flex-direction:column;gap:8px";
     z.appendChild(el("h3", null, "Zone"));
     z.appendChild(el("div", "sub", (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"));
+    if (j.status === "active") {
+      var f = el("div", "field"), lb = el("label", null, "Zone width (ft)"); lb.htmlFor = "editsize";
+      var inp = el("input"); inp.type = "number"; inp.id = "editsize"; inp.min = 30; inp.max = 2000; inp.value = j.widthFt;
+      var row = el("div", "row"), sv = el("button", "btn ghost", "Update size"); sv.type = "button"; sv.style.flex = "0 0 auto";
+      var er = el("p", "err"); er.setAttribute("role", "alert");
+      inp.addEventListener("input", function () {
+        var w = Number(inp.value);
+        if (w >= 30 && w <= 2000 && layers[j.id]) layers[j.id].setLatLngs(zonePoints(j.center, j.shape, w).map(function (p) { return [p.lat, p.lon]; }));
+      });
+      sv.addEventListener("click", function () {
+        var w = Number(inp.value);
+        if (!(w >= 30 && w <= 2000)) { er.textContent = "Zone width must be between 30 and 2000 ft."; return; }
+        er.textContent = ""; sv.disabled = true;
+        var old = j.widthFt;
+        updateZone(j, w).then(function () { j.widthFt = w; return saveJob(j); })
+          .then(function () { refresh(); })
+          .catch(function (err) { j.widthFt = old; sv.disabled = false; er.textContent = "Could not update the zone: " + (err && err.message ? err.message : err); });
+      });
+      row.appendChild(inp); row.appendChild(sv); f.appendChild(lb); f.appendChild(row); f.appendChild(er); z.appendChild(f);
+    }
     box.appendChild(z);
 
     if (j.status === "active") {
