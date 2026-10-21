@@ -4,7 +4,7 @@ geotab.addin.request = function (elt, service) {
   "use strict";
   var ADDIN_ID = "aJz4Qm8RkT1uWv3Xn6YcP2g";
   var jobs = [], filter = "active", selectedId = null, view = "list";
-  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null, editingItem = null;
+  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null, editingItem = null, period = "week", ovSeq = 0;
 
   var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   var api = function (method, params) { return service.api.call(method, params); };
@@ -99,34 +99,42 @@ geotab.addin.request = function (elt, service) {
   }
   function idOf(v) { return v && typeof v === "object" ? v.id : v; }
   function isKnown(d) { return !!d && d !== "UnknownDriverId" && d !== "NoDriverId"; }
-  function track(job) {
-    var start = new Date(job.createdAt), end = (job.status === "closed" && job.closedAt) ? new Date(job.closedAt) : new Date(), poly = jobPts(job);
+  function fetchData(from, to) {
     return service.api.multiCall([
       ["Get", { typeName: "DeviceStatusInfo" }],
       ["Get", { typeName: "Device" }],
       ["Get", { typeName: "User", search: { isDriver: true } }],
-      ["Get", { typeName: "Trip", search: { fromDate: start.toISOString(), toDate: end.toISOString() }, resultsLimit: 5000 }]
-    ]).then(function (r) {
-      var dn = {}, un = {}, rawHours = 0, seenV = {}, seenD = {}, openAt = {}, hasStop = {}, now = [], nowDrv = {};
-      r[1].forEach(function (d) { dn[d.id] = d.name; });
-      r[2].forEach(function (u) { un[u.id] = ((u.firstName || "") + " " + (u.lastName || "")).trim() || u.name; });
-      r[3].forEach(function (t) {
-        if (!t.stopPoint || !inPoly({ lat: t.stopPoint.y, lng: t.stopPoint.x }, poly)) return;
-        var did = idOf(t.device), dr = idOf(t.driver), arr = new Date(t.stop);
-        var nx = t.nextTripStart ? new Date(t.nextTripStart) : null, open = !nx || nx.getFullYear() > 2040 || nx > end;
-        if (open) nx = end;
-        var a = arr < start ? start : arr; if (nx > a) rawHours += (nx - a) / 3600000;
-        seenV[did] = 1; if (isKnown(dr)) seenD[dr] = 1; hasStop[did] = 1; if (open) openAt[did] = a;
-      });
-      if (job.status === "active") r[0].forEach(function (s) {
-        if (s.latitude == null || s.longitude == null || !inPoly({ lat: s.latitude, lng: s.longitude }, poly)) return;
-        var did = idOf(s.device), dr = idOf(s.driver);
-        if (!hasStop[did]) { rawHours += (end - start) / 3600000; seenV[did] = 1; }   // was already here when the job opened
-        if (isKnown(dr)) { nowDrv[dr] = 1; seenD[dr] = 1; }
-        now.push({ vehicle: dn[did] || did, driver: isKnown(dr) ? (un[dr] || dr) : "No driver assigned", since: openAt[did] || start });
-      });
-      return { now: now, nowDrivers: Object.keys(nowDrv).length, rawHours: rawHours, visitedVeh: Object.keys(seenV).length, visitedDrv: Object.keys(seenD).length };
+      ["Get", { typeName: "Trip", search: { fromDate: from.toISOString(), toDate: to.toISOString() }, resultsLimit: 5000 }]
+    ]).then(function (r) { return { status: r[0], devices: r[1], users: r[2], trips: r[3] }; });
+  }
+  // Works out one job's activity inside the window [ws, now] from already-fetched data.
+  function compute(job, d, ws) {
+    var now0 = new Date(), jobStart = new Date(job.createdAt), jobEnd = (job.status === "closed" && job.closedAt) ? new Date(job.closedAt) : now0;
+    var start = jobStart < ws ? ws : jobStart, end = jobEnd, poly = jobPts(job);
+    var dn = {}, un = {}, rawHours = 0, seenV = {}, seenD = {}, openAt = {}, hasStop = {}, now = [], nowDrv = {};
+    if (!(end > start)) return { now: now, nowDrivers: 0, rawHours: 0, visitedVeh: 0, visitedDrv: 0 };
+    d.devices.forEach(function (x) { dn[x.id] = x.name; });
+    d.users.forEach(function (u) { un[u.id] = ((u.firstName || "") + " " + (u.lastName || "")).trim() || u.name; });
+    d.trips.forEach(function (t) {
+      if (!t.stopPoint || !inPoly({ lat: t.stopPoint.y, lng: t.stopPoint.x }, poly)) return;
+      var did = idOf(t.device), dr = idOf(t.driver), arr = new Date(t.stop);
+      var nx = t.nextTripStart ? new Date(t.nextTripStart) : null, open = !nx || nx.getFullYear() > 2040 || nx > end;
+      if (open) nx = end;
+      var a = arr < start ? start : arr; if (nx > a) rawHours += (nx - a) / 3600000;
+      seenV[did] = 1; if (isKnown(dr)) seenD[dr] = 1; hasStop[did] = 1; if (open) openAt[did] = a;
     });
+    if (job.status === "active") d.status.forEach(function (s) {
+      if (s.latitude == null || s.longitude == null || !inPoly({ lat: s.latitude, lng: s.longitude }, poly)) return;
+      var did = idOf(s.device), dr = idOf(s.driver);
+      if (!hasStop[did]) { rawHours += (end - start) / 3600000; seenV[did] = 1; }   // was already here when the window opened
+      if (isKnown(dr)) { nowDrv[dr] = 1; seenD[dr] = 1; }
+      now.push({ vehicle: dn[did] || did, driver: isKnown(dr) ? (un[dr] || dr) : "No driver assigned", since: openAt[did] || start });
+    });
+    return { now: now, nowDrivers: Object.keys(nowDrv).length, rawHours: rawHours, visitedVeh: Object.keys(seenV).length, visitedDrv: Object.keys(seenD).length };
+  }
+  function track(job) {
+    var start = new Date(job.createdAt), end = (job.status === "closed" && job.closedAt) ? new Date(job.closedAt) : new Date();
+    return fetchData(start, end).then(function (d) { return compute(job, d, start); });
   }
 
   /* ---------- views ---------- */
@@ -147,14 +155,82 @@ geotab.addin.request = function (elt, service) {
   function render() {
     if (view === "add") return renderAdd();
     if (view === "adopt") return renderAdopt();
+    if (view === "overview") return renderOverview();
     if (view === "item" && byId(selectedId)) return renderItem();
     if (view === "detail" && byId(selectedId)) return renderDetail(byId(selectedId));
     view = "list"; renderList();
   }
 
+  function modeTabs(root) {
+    var t = el("div", "fwjz-tabs");
+    [["list", "Jobs"], ["overview", "Overview"]].forEach(function (m) {
+      var b = el("button", "fwjz-tab", m[1]); b.type = "button"; b.setAttribute("aria-pressed", String(view === m[0]));
+      b.addEventListener("click", function () { selectedId = null; view = m[0]; render(); }); t.appendChild(b);
+    });
+    root.appendChild(t);
+  }
+  function periodStart(p) {
+    var n = new Date(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+    if (p === "day") return d;
+    if (p === "week") { d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; }   // Monday
+    if (p === "month") return new Date(n.getFullYear(), n.getMonth(), 1);
+    if (p === "year") return new Date(n.getFullYear(), 0, 1);
+    return null;   // all time
+  }
+  function itemDate(it, j) { var t = Number(String(it.id || "").slice(1)); return t > 1e12 ? new Date(t) : new Date(j.createdAt); }
+
+  function renderOverview() {
+    clearShape();
+    var root = frame("Overview"), mySeq = ++ovSeq;
+    modeTabs(root);
+    var tabs = el("div", "fwjz-tabs");
+    [["day", "Today"], ["week", "This week"], ["month", "This month"], ["year", "This year"], ["all", "All time"]].forEach(function (t) {
+      var b = el("button", "fwjz-tab", t[1]); b.type = "button"; b.setAttribute("aria-pressed", String(period === t[0]));
+      b.addEventListener("click", function () { period = t[0]; render(); }); tabs.appendChild(b);
+    });
+    root.appendChild(tabs);
+    var body = el("div"); body.style.cssText = "display:flex;flex-direction:column;gap:16px"; root.appendChild(body);
+    root.appendChild(signature());
+    if (!jobs.length) { body.appendChild(el("div", "fwjz-empty", "No jobs yet. Add a job and its totals will show here.")); return; }
+    body.appendChild(el("p", "fwjz-note", "Loading totals…"));
+    var ps = periodStart(period), from = ps;
+    if (!from) from = jobs.reduce(function (m, j) { var c = new Date(j.createdAt); return !m || c < m ? c : m; }, null);
+    fetchData(from, new Date()).then(function (d) {
+      if (mySeq !== ovSeq || view !== "overview") return;
+      var rows = [], T = { mh: 0, lab: 0, inv: 0 }, noRate = 0;
+      jobs.forEach(function (j) {
+        var r = compute(j, d, ps || new Date(j.createdAt));
+        var mh = r.rawHours * (j.crewSize || 1), rate = Number(j.hourlyRate) || 0, lab = mh * rate;
+        var inv = (j.items || []).reduce(function (a, it) { return (!ps || itemDate(it, j) >= ps) ? a + it.qty * it.unitCost : a; }, 0);
+        if (!(mh > 0 || inv > 0 || j.status === "active")) return;
+        if (j.hourlyRate == null && mh > 0) noRate++;
+        T.mh += mh; T.lab += lab; T.inv += inv; rows.push({ j: j, mh: mh, lab: lab, inv: inv, tot: lab + inv });
+      });
+      body.textContent = "";
+      var tiles = el("div", "fwjz-tiles");
+      [["Jobs", String(rows.length)], ["Man-hours", T.mh.toFixed(1)], ["Labor cost", money(T.lab)], ["Inventory cost", money(T.inv)]].forEach(function (t) {
+        var x = el("div", "fwjz-tile"); x.appendChild(el("div", "l", t[0])); var v = el("div", "v", t[1]); v.style.fontSize = "26px"; x.appendChild(v); tiles.appendChild(x);
+      });
+      var tt = el("div", "fwjz-tile hi"); tt.style.gridColumn = "1 / -1"; tt.appendChild(el("div", "l", "Total job cost")); tt.appendChild(el("div", "v", money(T.lab + T.inv))); tiles.appendChild(tt);
+      body.appendChild(tiles);
+      if (noRate) body.appendChild(el("p", "fwjz-note", noRate + " job(s) have man-hours but no labor rate set, so their labor shows as $0.00. Open the job to set a rate."));
+      body.appendChild(el("h2", null, "By job"));
+      if (!rows.length) body.appendChild(el("div", "fwjz-empty", "No activity in this period."));
+      rows.sort(function (a, b) { return b.tot - a.tot || b.mh - a.mh; }).forEach(function (r) {
+        var c = el("button", "fwjz-card"); c.type = "button"; c.style.alignItems = "center";
+        var m = el("span", "fwjz-meta"); m.appendChild(el("strong", null, r.j.name));
+        m.appendChild(el("span", "sub", r.mh.toFixed(1) + " h · labor " + money(r.lab) + " · inventory " + money(r.inv))); c.appendChild(m);
+        c.appendChild(el("span", "fwjz-stat", money(r.tot)));
+        c.addEventListener("click", function () { open(r.j.id); }); body.appendChild(c);
+      });
+      body.appendChild(el("p", "fwjz-note", "Man-hours are counted only for time inside the period. Inventory counts on the day each item was added. Updated " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + "."));
+    }).catch(function (e) { if (mySeq === ovSeq) { body.textContent = ""; msg("Could not load totals: " + errText(e), true); } });
+  }
+
   function renderList() {
     clearShape();
     var root = frame("Job Zones");
+    modeTabs(root);
     var add = el("button", "fwjz-btn", "+ Add job"); add.type = "button"; add.style.flex = "1 1 auto";
     add.addEventListener("click", function () { draft = draft || lastMapLoc; view = "add"; render(); });
     var ex = el("button", "fwjz-btn ghost", "Use existing zone"); ex.type = "button"; ex.style.flex = "1 1 auto";
