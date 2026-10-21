@@ -63,6 +63,10 @@ dialog form{display:flex;flex-direction:column;gap:24px;padding:24px 32px}
 .err{color:#9b1c1c;font-size:13px;min-height:18px;margin:0}
 footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-height:16px;color:var(--ink2)}
 #pickbar[hidden]{display:none!important}
+#detailcol[hidden]{display:none}
+#detailcol{animation:slidein .22s ease-out}
+@keyframes slidein{from{transform:translateX(32px);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#detailcol{animation:none}}
 .empty{padding:16px;border:1px dashed var(--steel);border-radius:12px;font-size:13px;color:var(--ink2)}
 </style>
 </head>
@@ -87,7 +91,7 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
 <section id="mapwrap" aria-label="Job zone map"><div id="map"></div>
 <div id="pickbar" hidden style="position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;align-items:center;gap:16px;padding:8px 8px 8px 16px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:13px;font-weight:600">Click the map to place the job zone<button class="btn ghost" id="pickCancel" type="button">Cancel</button></div></section>
 
-<aside id="detailcol" aria-live="polite"></aside>
+<aside id="detailcol" aria-live="polite" aria-label="Job details" hidden></aside>
 </div>
 
 <footer>Designed by Fleet Wolf · randy@fleetwolf.com · 626-384-9013 · www.fleetwolf.com</footer>
@@ -227,11 +231,17 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
   function renderDetail() {
     var box = $("detailcol"); box.textContent = "";
     var j = jobs.filter(function (x) { return x.id === selectedId; })[0];
-    if (!j) { box.appendChild(el("div", "empty", "Select a job to see its zone and activity.")); return; }
-    var head = el("div"); head.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    if (!j) { box.hidden = true; return; }
+    box.hidden = false;
+    var head = el("div"); head.style.cssText = "display:flex;flex-direction:column;gap:4px;flex-grow:1;min-width:0";
     var st = el("div", "stat"); if (j.status === "active") st.appendChild(el("span", "dot")); st.appendChild(document.createTextNode((j.status === "active" ? "Active since " : "Closed · opened ") + new Date(j.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
     head.appendChild(st); head.appendChild(el("h2", null, j.name)); head.appendChild(el("div", "sub", j.address || "Placed on map"));
-    box.appendChild(head);
+    var top = el("div"); top.style.cssText = "display:flex;align-items:flex-start;gap:16px";
+    var x = el("button"); x.type = "button"; x.setAttribute("aria-label", "Close job panel");
+    x.style.cssText = "flex:0 0 44px;width:44px;height:44px;border:1px solid var(--line);border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center";
+    x.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#083d5d" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg>';
+    x.addEventListener("click", closePanel);
+    top.appendChild(head); top.appendChild(x); box.appendChild(top);
 
     var tiles = el("div", "tiles");
     [["Vehicles on site", "—"], ["Drivers on site", "—"], ["Man-hours", "—", 1], ["Inventory cost", "—"]].forEach(function (t) {
@@ -275,7 +285,9 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
     }
   }
 
-  function refresh() { renderList(); renderMap(); renderDetail(); }
+  function refresh() { renderList(); renderMap(); renderDetail(); if (map) map.invalidateSize(); }
+  function closePanel() { selectedId = null; refresh(); }
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape" && selectedId && !$("dlg").open) closePanel(); });
   function select(id, fly) {
     selectedId = id; refresh();
     var j = jobs.filter(function (x) { return x.id === id; })[0];
@@ -345,7 +357,7 @@ footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-he
     load();
   }
   function load() {
-    return listJobs().then(function (r) { jobs = r; refresh(); if (jobs.length && !selectedId) { var a = jobs.filter(function (j) { return j.status === "active"; })[0]; if (a) { selectedId = a.id; refresh(); } } })
+    return listJobs().then(function (r) { jobs = r; refresh(); })
       .catch(function (err) { $("list").textContent = "Could not load jobs: " + (err && err.message ? err.message : err); });
   }
 
