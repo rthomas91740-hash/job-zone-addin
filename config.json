@@ -1,0 +1,13 @@
+{
+  "name": "Job Zones",
+  "supportEmail": "randy@fleetwolf.com",
+  "version": "0.1.0",
+  "items": [
+    {
+      "url": "https://rthomas91740-hash.github.io/job-zone-addin/index.html",
+      "path": "ActivityLink/",
+      "menuName": { "en": "Job Zones" }
+    }
+  ],
+  "isSigned": false
+}

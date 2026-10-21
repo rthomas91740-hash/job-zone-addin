@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Zones</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--navy:#083d5d;--cyan:#00a8e7;--steel:#919296;--line:#c6c7c9;--ink2:#4a5b68;--white:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--white);color:var(--navy);font:15px/22px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--cyan);outline-offset:2px}
+.app{min-height:100vh;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:16px 32px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:baseline;gap:12px;flex-grow:1}
+.wm{font-size:26px;font-weight:800;letter-spacing:.5px;line-height:30px}
+.wm span{color:var(--cyan)}
+.sep{width:1px;height:22px;background:var(--line);align-self:center}
+h1{margin:0;font-size:22px;line-height:28px}
+h2{margin:0;font-size:22px;line-height:28px}
+h3{margin:0;font-size:15px;line-height:22px}
+.btn{min-height:44px;padding:0 20px;border:0;border-radius:12px;background:var(--navy);color:#fff;font-size:13px;font-weight:600}
+.btn.ghost{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+.btn:disabled{opacity:.5;cursor:default}
+.cols{display:flex;flex-wrap:wrap;flex-grow:1;align-items:stretch}
+aside{display:flex;flex-direction:column;gap:16px;padding:24px 32px}
+#listcol{flex:1 1 320px;max-width:360px;border-right:1px solid var(--line)}
+#detailcol{flex:1 1 360px;max-width:420px;border-left:1px solid var(--line);gap:24px}
+#mapwrap{flex:999 1 480px;min-width:0;min-height:600px;position:relative}
+#map{position:absolute;inset:0}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tab{min-height:44px;padding:0 16px;border:1px solid var(--steel);border-radius:9999px;background:#fff;color:var(--navy);font-size:13px;font-weight:600}
+.tab[aria-pressed="true"]{background:var(--navy);color:#fff;border-color:var(--navy)}
+.card{display:flex;gap:16px;align-items:flex-start;text-align:left;padding:16px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--navy);width:100%}
+.card.sel{border:2px solid var(--cyan);padding:15px}
+.ico{flex:0 0 44px;height:44px;border-radius:9999px;background:var(--navy);display:flex;align-items:center;justify-content:center}
+.ico.off{background:#fff;border:2px solid var(--navy)}
+.meta{display:flex;flex-direction:column;gap:4px;flex-grow:1}
+.sub{font-size:13px;line-height:18px;color:var(--ink2)}
+.dot{width:8px;height:8px;border-radius:9999px;background:var(--cyan);display:inline-block;margin-right:4px}
+.stat{font-size:12px;line-height:16px;font-weight:600;white-space:nowrap}
+.tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.tile{padding:16px;border:1px solid var(--line);border-radius:12px}
+.tile.hi{border:2px solid var(--cyan);padding:15px}
+.tile .l{font-size:13px;line-height:18px;font-weight:600}
+.tile .v{font-size:32px;line-height:38px;font-weight:800}
+.note{font-size:12px;line-height:16px;color:var(--ink2);margin:0}
+label{font-size:13px;line-height:18px;font-weight:600}
+input[type=text],input[type=number]{width:100%;min-height:44px;padding:0 16px;border:1px solid var(--steel);border-radius:12px;font:inherit;color:var(--navy)}
+.field{display:flex;flex-direction:column;gap:4px}
+dialog{border:0;border-radius:12px;padding:0;width:min(600px,94vw);color:var(--navy)}
+dialog::backdrop{background:rgba(8,61,93,.45)}
+dialog form{display:flex;flex-direction:column;gap:24px;padding:24px 32px}
+.shapes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;border:0;padding:0;margin:0}
+.shapes legend{padding:0;margin-bottom:8px;font-size:13px;font-weight:600}
+.shape{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;border:1px solid var(--line);border-radius:12px;cursor:pointer;font-size:13px;font-weight:600}
+.shape input{position:absolute;opacity:0}
+.shape:has(input:checked){border:2px solid var(--cyan);padding:15px}
+.shape:has(input:focus-visible){outline:3px solid var(--cyan);outline-offset:2px}
+.row{display:flex;gap:16px}
+.row>*{flex:1 1 0}
+.err{color:#9b1c1c;font-size:13px;min-height:18px;margin:0}
+footer{padding:12px 32px;border-top:1px solid var(--line);font-size:12px;line-height:16px;color:var(--ink2)}
+#pickbar[hidden]{display:none!important}
+.empty{padding:16px;border:1px dashed var(--steel);border-radius:12px;font-size:13px;color:var(--ink2)}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+<div class="brand"><span class="wm">FLEET<span>WOLF</span></span><span class="sep"></span><h1>Job Zones</h1></div>
+<button class="btn" id="addBtn" type="button">+ Add job</button>
+</header>
+
+<div class="cols">
+<aside id="listcol">
+<div class="tabs" id="tabs">
+<button class="tab" type="button" data-f="active" aria-pressed="true">Active</button>
+<button class="tab" type="button" data-f="closed" aria-pressed="false">Closed</button>
+<button class="tab" type="button" data-f="all" aria-pressed="false">All</button>
+</div>
+<div id="list" style="display:flex;flex-direction:column;gap:16px"></div>
+<p class="note">Each job is a Geotab zone. Tracking runs only while a job is open.</p>
+</aside>
+
+<section id="mapwrap" aria-label="Job zone map"><div id="map"></div>
+<div id="pickbar" hidden style="position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:1000;display:flex;align-items:center;gap:16px;padding:8px 8px 8px 16px;background:#fff;border:1px solid var(--line);border-radius:12px;font-size:13px;font-weight:600">Click the map to place the job zone<button class="btn ghost" id="pickCancel" type="button">Cancel</button></div></section>
+
+<aside id="detailcol" aria-live="polite"></aside>
+</div>
+
+<footer>Designed by Fleet Wolf · randy@fleetwolf.com · 626-384-9013 · www.fleetwolf.com</footer>
+</div>
+
+<dialog id="dlg">
+<form id="form" method="dialog">
+<div><div class="note" style="font-weight:600;letter-spacing:.5px">FLEETWOLF · JOB ZONES</div><h2 style="font-size:32px;line-height:38px">Add job</h2></div>
+<div class="field"><label for="fname">Job name</label><input id="fname" type="text" placeholder="e.g. Maple Ave re-roof" required></div>
+<div class="field"><label for="faddr">Job address</label>
+<div class="row"><input id="faddr" type="text" placeholder="Search an address" style="flex:1 1 auto"><button class="btn ghost" id="findBtn" type="button" style="flex:0 0 auto">Find</button><button class="btn ghost" id="pickBtn" type="button" style="flex:0 0 auto">Pick on map</button></div>
+<p class="note" id="locnote">No location yet. Search an address or pick a spot on the map.</p>
+</div>
+<fieldset class="shapes"><legend>Zone shape</legend>
+<label class="shape"><input type="radio" name="shape" value="square" checked>
+<svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true"><rect x="8" y="8" width="40" height="40" rx="4" fill="#00a8e7" fill-opacity=".22" stroke="#00a8e7" stroke-width="3"/></svg>Square</label>
+<label class="shape"><input type="radio" name="shape" value="house">
+<svg width="56" height="56" viewBox="0 0 56 56" aria-hidden="true"><path d="M8 28L28 8l20 20h-6v20H14V28z" fill="#083d5d" fill-opacity=".14" stroke="#083d5d" stroke-width="3" stroke-linejoin="round"/></svg>House</label>
+</fieldset>
+<div class="field"><label for="fsize">Zone width (ft)</label><input id="fsize" type="number" min="30" max="2000" value="150"></div>
+<p class="err" id="err" role="alert"></p>
+<div class="row"><button class="btn ghost" type="button" id="cancelBtn">Cancel</button><button class="btn" type="submit" id="saveBtn" style="flex:2 1 0">Create job and start tracking</button></div>
+</form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function () {
+  "use strict";
+  // Fixed id that groups this add-in's saved jobs in MyGeotab AddInData.
+  var ADDIN_ID = "aJz4Qm8RkT1uWv3Xn6YcP2g";
+  var LS_KEY = "fleetwolf.jobzones.v1";
+  var GEO = null;           // MyGeotab api when running inside MyGeotab
+  var jobs = [], filter = "active", selectedId = null;
+  var map, layers = {}, preview = null, draft = null, booted = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  /* ---------- zone geometry ---------- */
+  function zonePoints(c, shape, widthFt) {
+    var w = widthFt * 0.3048, h = w / 2;
+    var pts = shape === "house"
+      ? [[-h, -h], [h, -h], [h, w / 6], [0, h], [-h, w / 6]]
+      : [[-h, -h], [h, -h], [h, h], [-h, h]];
+    var mLat = 111320, mLon = 111320 * Math.cos(c.lat * Math.PI / 180);
+    return pts.map(function (p) { return { lat: c.lat + p[1] / mLat, lon: c.lon + p[0] / mLon }; });
+  }
+
+  /* ---------- storage: MyGeotab when embedded, localStorage otherwise ---------- */
+  function call(method, params) {
+    return new Promise(function (res, rej) { GEO.call(method, params, res, rej); });
+  }
+  function listJobs() {
+    if (!GEO) return Promise.resolve(JSON.parse(localStorage.getItem(LS_KEY) || "[]"));
+    return call("Get", { typeName: "AddInData", search: { addInId: ADDIN_ID } }).then(function (rows) {
+      return rows.map(function (r) { var d = r.details || {}; d.id = r.id; return d; });
+    });
+  }
+  function createJob(job) {
+    if (!GEO) {
+      job.id = "local-" + Date.now();
+      var all = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); all.push(job);
+      localStorage.setItem(LS_KEY, JSON.stringify(all));
+      return Promise.resolve(job);
+    }
+    var pts = zonePoints(job.center, job.shape, job.widthFt).map(function (p) { return { x: p.lon, y: p.lat }; });
+    return call("Add", { typeName: "Zone", entity: {
+      name: "Job: " + job.name, points: pts, displayed: true, mustIdentifyStops: false,
+      fillColor: { r: 0, g: 168, b: 231, a: 80 }, activeFrom: new Date().toISOString(),
+      activeTo: "2050-01-01T00:00:00.000Z", zoneTypes: [{ id: "ZoneTypeCustomerId" }],
+      groups: [{ id: "GroupCompanyId" }]
+    } }).then(function (zoneId) {
+      job.zoneId = zoneId;
+      return call("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, details: job } });
+    }).then(function (id) { job.id = id; return job; });
+  }
+  function saveJob(job) {
+    if (!GEO) {
+      var all = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+      all = all.map(function (j) { return j.id === job.id ? job : j; });
+      localStorage.setItem(LS_KEY, JSON.stringify(all));
+      return Promise.resolve(job);
+    }
+    var d = JSON.parse(JSON.stringify(job)); delete d.id;
+    return call("Set", { typeName: "AddInData", entity: { id: job.id, addInId: ADDIN_ID, details: d } }).then(function () { return job; });
+  }
+
+  /* ---------- rendering ---------- */
+  var SQUARE_SVG = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="16" height="16" rx="2"/></svg>';
+  var HOUSE_SVG = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l8-7 8 7v9H3z"/></svg>';
+  function icon(job) { var d = el("span", "ico" + (job.status === "closed" ? " off" : "")); d.style.color = job.status === "closed" ? "#083d5d" : "#fff"; d.innerHTML = job.shape === "house" ? HOUSE_SVG : SQUARE_SVG; return d; }
+  function visible() { return jobs.filter(function (j) { return filter === "all" || j.status === filter; }); }
+
+  function renderList() {
+    var box = $("list"); box.textContent = "";
+    var v = visible();
+    if (!v.length) { box.appendChild(el("div", "empty", filter === "active" ? "No active jobs yet. Use Add job to drop your first zone." : "Nothing here yet.")); }
+    v.forEach(function (j) {
+      var b = el("button", "card" + (j.id === selectedId ? " sel" : "")); b.type = "button";
+      b.appendChild(icon(j));
+      var m = el("span", "meta");
+      m.appendChild(el("span", null, j.name)).style.fontWeight = "700";
+      m.appendChild(el("span", "sub", j.address || "Placed on map"));
+      b.appendChild(m);
+      var s = el("span", "stat"); if (j.status === "active") s.appendChild(el("span", "dot")); s.appendChild(document.createTextNode(j.status === "active" ? "Active" : "Closed"));
+      b.appendChild(s);
+      b.addEventListener("click", function () { select(j.id, true); });
+      box.appendChild(b);
+    });
+  }
+
+  function renderMap() {
+    Object.keys(layers).forEach(function (k) { map.removeLayer(layers[k]); }); layers = {};
+    jobs.forEach(function (j) {
+      var ll = zonePoints(j.center, j.shape, j.widthFt).map(function (p) { return [p.lat, p.lon]; });
+      var sel = j.id === selectedId, closed = j.status === "closed";
+      layers[j.id] = L.polygon(ll, sel
+        ? { color: "#00a8e7", weight: 4, fillColor: "#00a8e7", fillOpacity: .22 }
+        : { color: closed ? "#919296" : "#083d5d", weight: 3, dashArray: "8 6", fillColor: "#083d5d", fillOpacity: .1 }
+      ).addTo(map).on("click", function () { select(j.id, false); });
+      layers[j.id].bindTooltip(j.name, { permanent: sel, direction: "top" });
+    });
+  }
+
+  function renderDetail() {
+    var box = $("detailcol"); box.textContent = "";
+    var j = jobs.filter(function (x) { return x.id === selectedId; })[0];
+    if (!j) { box.appendChild(el("div", "empty", "Select a job to see its zone and activity.")); return; }
+    var head = el("div"); head.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    var st = el("div", "stat"); if (j.status === "active") st.appendChild(el("span", "dot")); st.appendChild(document.createTextNode((j.status === "active" ? "Active since " : "Closed · opened ") + new Date(j.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
+    head.appendChild(st); head.appendChild(el("h2", null, j.name)); head.appendChild(el("div", "sub", j.address || "Placed on map"));
+    box.appendChild(head);
+
+    var tiles = el("div", "tiles");
+    [["Vehicles on site", "—"], ["Drivers on site", "—"], ["Man-hours", "—", 1], ["Inventory cost", "—"]].forEach(function (t) {
+      var d = el("div", "tile" + (t[2] ? " hi" : "")); d.appendChild(el("div", "l", t[0])); d.appendChild(el("div", "v", t[1])); tiles.appendChild(d);
+    });
+    box.appendChild(tiles);
+    box.appendChild(el("p", "note", "Vehicle, driver, man-hour and inventory tracking come in the next build step."));
+
+    var z = el("div"); z.style.cssText = "display:flex;flex-direction:column;gap:4px";
+    z.appendChild(el("h3", null, "Zone"));
+    z.appendChild(el("div", "sub", (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"));
+    box.appendChild(z);
+
+    if (j.status === "active") {
+      var c = el("button", "btn", "Close job"); c.type = "button"; c.style.marginTop = "auto";
+      c.addEventListener("click", function () {
+        j.status = "closed"; j.closedAt = new Date().toISOString();
+        saveJob(j).then(function () { refresh(); });
+      });
+      box.appendChild(c);
+    }
+  }
+
+  function refresh() { renderList(); renderMap(); renderDetail(); }
+  function select(id, fly) {
+    selectedId = id; refresh();
+    var j = jobs.filter(function (x) { return x.id === id; })[0];
+    if (j && fly) map.flyTo([j.center.lat, j.center.lon], 18, { duration: .6 });
+  }
+
+  /* ---------- add-job dialog ---------- */
+  function readShape() { return document.querySelector('input[name="shape"]:checked').value; }
+  function drawPreview() {
+    if (preview) { map.removeLayer(preview); preview = null; }
+    if (!draft) return;
+    var w = Math.max(30, Number($("fsize").value) || 150);
+    preview = L.polygon(zonePoints(draft, readShape(), w).map(function (p) { return [p.lat, p.lon]; }),
+      { color: "#00a8e7", weight: 3, dashArray: "4 6", fillColor: "#00a8e7", fillOpacity: .15 }).addTo(map);
+  }
+  function setDraft(lat, lon, note) {
+    draft = { lat: lat, lon: lon };
+    $("locnote").textContent = note || ("Location set: " + lat.toFixed(5) + ", " + lon.toFixed(5));
+    map.setView([lat, lon], 18); drawPreview();
+  }
+  var pickMode = false;
+  function openDialog() { $("form").reset(); $("err").textContent = ""; draft = null; $("locnote").textContent = "No location yet. Search an address or pick a spot on the map."; $("dlg").showModal(); }
+  function closeDialog() { $("dlg").close(); if (preview) { map.removeLayer(preview); preview = null; } }
+  function endPick() { pickMode = false; $("pickbar").hidden = true; map.getContainer().style.cursor = ""; $("dlg").showModal(); }
+
+  $("addBtn").addEventListener("click", openDialog);
+  $("cancelBtn").addEventListener("click", closeDialog);
+  $("pickBtn").addEventListener("click", function () { pickMode = true; $("dlg").close(); $("pickbar").hidden = false; map.getContainer().style.cursor = "crosshair"; });
+  $("pickCancel").addEventListener("click", endPick);
+  $("fsize").addEventListener("input", drawPreview);
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="shape"]'), function (r) { r.addEventListener("change", drawPreview); });
+  $("findBtn").addEventListener("click", function () {
+    var q = $("faddr").value.trim(); if (!q) { $("err").textContent = "Type an address first."; return; }
+    $("err").textContent = ""; $("locnote").textContent = "Searching…";
+    fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q))
+      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        if (!r.length) { $("locnote").textContent = "No match. Try a fuller address or click the map."; return; }
+        setDraft(parseFloat(r[0].lat), parseFloat(r[0].lon), "Found: " + r[0].display_name);
+      }).catch(function () { $("locnote").textContent = "Address search is unavailable. Click the map instead."; });
+  });
+  $("form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var name = $("fname").value.trim(), w = Number($("fsize").value);
+    if (!draft) { $("err").textContent = "Set a location first: search an address or click the map."; return; }
+    if (!(w >= 30 && w <= 2000)) { $("err").textContent = "Zone width must be between 30 and 2000 ft."; return; }
+    $("saveBtn").disabled = true;
+    createJob({ name: name, address: $("faddr").value.trim(), shape: readShape(), widthFt: w,
+      center: { lat: draft.lat, lon: draft.lon }, status: "active", createdAt: new Date().toISOString() })
+      .then(function (job) { jobs.push(job); closeDialog(); filter = "active"; syncTabs(); select(job.id, true); })
+      .catch(function (err) { $("err").textContent = "Could not save the job: " + (err && err.message ? err.message : err); })
+      .then(function () { $("saveBtn").disabled = false; });
+  });
+
+  function syncTabs() { Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) { t.setAttribute("aria-pressed", String(t.dataset.f === filter)); }); }
+  Array.prototype.forEach.call(document.querySelectorAll(".tab"), function (t) {
+    t.addEventListener("click", function () { filter = t.dataset.f; syncTabs(); renderList(); });
+  });
+
+  /* ---------- boot ---------- */
+  function boot() {
+    if (booted) { map.invalidateSize(); return load(); }
+    booted = true;
+    map = L.map("map", { zoomControl: true }).setView([39.5, -98.35], 4);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap contributors" }).addTo(map);
+    map.on("click", function (e) { if (!pickMode) return; setDraft(e.latlng.lat, e.latlng.lng); endPick(); });
+    load();
+  }
+  function load() {
+    return listJobs().then(function (r) { jobs = r; refresh(); if (jobs.length && !selectedId) { var a = jobs.filter(function (j) { return j.status === "active"; })[0]; if (a) { selectedId = a.id; refresh(); } } })
+      .catch(function (err) { $("list").textContent = "Could not load jobs: " + (err && err.message ? err.message : err); });
+  }
+
+  // MyGeotab add-in registration
+  window.geotab = window.geotab || { addin: {} };
+  window.geotab.addin = window.geotab.addin || {};
+  window.geotab.addin.jobZones = function () {
+    return {
+      initialize: function (api, state, cb) { GEO = api; boot(); if (cb) cb(); },
+      focus: function (api) { GEO = api || GEO; if (booted) { map.invalidateSize(); load(); } },
+      blur: function () {}
+    };
+  };
+  // Standalone (opened directly, not inside MyGeotab): run on localStorage.
+  if (window.self === window.top) { document.addEventListener("DOMContentLoaded", boot); if (document.readyState !== "loading") boot(); }
+})();
+</script>
+</body>
+</html>
