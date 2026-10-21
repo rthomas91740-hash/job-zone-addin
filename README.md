@@ -17,7 +17,7 @@ Both need GitHub Pages turned on (Settings > Pages > branch `main`, folder `/`).
 ## Build steps
 
 1. **Add jobs and zones** (done): add a job, zone on the map, edit zone size, close job. Each job is a real Geotab zone; job details are saved in the add-in's AddInData.
-2. Tracking: vehicles and drivers inside the zone, man-hours per job.
+2. **Tracking** (done, first version): vehicles and drivers on site now, man-hours since the job opened (time inside the zone × crew size), refreshed every minute. Reads DeviceStatusInfo and Trips. Auto co-driver count still to test.
 3. Inventory assigned to a job and job cost.
 
 Add-in id used for saved jobs: `aJz4Qm8RkT1uWv3Xn6YcP2g`.

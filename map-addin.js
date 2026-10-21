@@ -4,7 +4,7 @@ geotab.addin.request = function (elt, service) {
   "use strict";
   var ADDIN_ID = "aJz4Qm8RkT1uWv3Xn6YcP2g";
   var jobs = [], filter = "active", selectedId = null, view = "list";
-  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null;
+  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null;
 
   var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   var api = function (method, params) { return service.api.call(method, params); };
@@ -85,12 +85,55 @@ geotab.addin.request = function (elt, service) {
   function whereText(j) { return j.address || (j.existingZone ? "Existing Geotab zone" : "Placed on map"); }
   function shapeText(j) { return j.shape === "custom" ? "Existing zone · custom shape · about " + j.widthFt + " ft across" : (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"; }
 
+
+  /* ---------- tracking: who is in the zone, and for how long ---------- */
+  function inPoly(p, poly) {
+    var ins = false;
+    for (var i = 0, k = poly.length - 1; i < poly.length; k = i++) {
+      if (((poly[i].lat > p.lat) !== (poly[k].lat > p.lat)) &&
+          (p.lng < (poly[k].lng - poly[i].lng) * (p.lat - poly[i].lat) / (poly[k].lat - poly[i].lat) + poly[i].lng)) ins = !ins;
+    }
+    return ins;
+  }
+  function idOf(v) { return v && typeof v === "object" ? v.id : v; }
+  function isKnown(d) { return !!d && d !== "UnknownDriverId" && d !== "NoDriverId"; }
+  function track(job) {
+    var start = new Date(job.createdAt), end = (job.status === "closed" && job.closedAt) ? new Date(job.closedAt) : new Date(), poly = jobPts(job);
+    return service.api.multiCall([
+      ["Get", { typeName: "DeviceStatusInfo" }],
+      ["Get", { typeName: "Device" }],
+      ["Get", { typeName: "User", search: { isDriver: true } }],
+      ["Get", { typeName: "Trip", search: { fromDate: start.toISOString(), toDate: end.toISOString() }, resultsLimit: 5000 }]
+    ]).then(function (r) {
+      var dn = {}, un = {}, rawHours = 0, seenV = {}, seenD = {}, openAt = {}, hasStop = {}, now = [], nowDrv = {};
+      r[1].forEach(function (d) { dn[d.id] = d.name; });
+      r[2].forEach(function (u) { un[u.id] = ((u.firstName || "") + " " + (u.lastName || "")).trim() || u.name; });
+      r[3].forEach(function (t) {
+        if (!t.stopPoint || !inPoly({ lat: t.stopPoint.y, lng: t.stopPoint.x }, poly)) return;
+        var did = idOf(t.device), dr = idOf(t.driver), arr = new Date(t.stop);
+        var nx = t.nextTripStart ? new Date(t.nextTripStart) : null, open = !nx || nx.getFullYear() > 2040 || nx > end;
+        if (open) nx = end;
+        var a = arr < start ? start : arr; if (nx > a) rawHours += (nx - a) / 3600000;
+        seenV[did] = 1; if (isKnown(dr)) seenD[dr] = 1; hasStop[did] = 1; if (open) openAt[did] = a;
+      });
+      if (job.status === "active") r[0].forEach(function (s) {
+        if (s.latitude == null || s.longitude == null || !inPoly({ lat: s.latitude, lng: s.longitude }, poly)) return;
+        var did = idOf(s.device), dr = idOf(s.driver);
+        if (!hasStop[did]) { rawHours += (end - start) / 3600000; seenV[did] = 1; }   // was already here when the job opened
+        if (isKnown(dr)) { nowDrv[dr] = 1; seenD[dr] = 1; }
+        now.push({ vehicle: dn[did] || did, driver: isKnown(dr) ? (un[dr] || dr) : "No driver assigned", since: openAt[did] || start });
+      });
+      return { now: now, nowDrivers: Object.keys(nowDrv).length, rawHours: rawHours, visitedVeh: Object.keys(seenV).length, visitedDrv: Object.keys(seenD).length };
+    });
+  }
+
   /* ---------- views ---------- */
   var SQ = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="16" height="16" rx="2"/></svg>';
   var HO = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l8-7 8 7v9H3z"/></svg>';
   var PL = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 7l7-4 7 5-2 9-8 2z"/></svg>';
   function iconFor(j) { return j.shape === "house" ? HO : (j.shape === "custom" ? PL : SQ); }
   function frame(title) {
+    if (timer) { clearInterval(timer); timer = null; }
     elt.textContent = "";
     var root = el("div", "fwjz");
     var head = el("div", "fwjz-head");
@@ -149,12 +192,51 @@ geotab.addin.request = function (elt, service) {
     st.appendChild(document.createTextNode((j.status === "active" ? "Active since " : "Closed · opened ") + new Date(j.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
     root.appendChild(st); root.appendChild(el("div", "sub", whereText(j)));
 
-    var tiles = el("div", "fwjz-tiles");
-    [["Vehicles on site", "—"], ["Drivers on site", "—"], ["Man-hours", "—", 1], ["Inventory cost", "—"]].forEach(function (t) {
-      var d = el("div", "fwjz-tile" + (t[2] ? " hi" : "")); d.appendChild(el("div", "l", t[0])); d.appendChild(el("div", "v", t[1])); tiles.appendChild(d);
+    var vals = {}, tiles = el("div", "fwjz-tiles");
+    [["veh", "Vehicles on site", "…"], ["drv", "Drivers on site", "…"], ["mh", "Man-hours", "…", 1], ["inv", "Inventory cost", "—"]].forEach(function (t) {
+      var d = el("div", "fwjz-tile" + (t[3] ? " hi" : "")); d.appendChild(el("div", "l", t[1])); vals[t[0]] = el("div", "v", t[2]); d.appendChild(vals[t[0]]); tiles.appendChild(d);
     });
     root.appendChild(tiles);
-    root.appendChild(el("p", "fwjz-note", "Vehicle, driver, man-hour and inventory tracking come in the next build step."));
+    var nowBox = el("div"); nowBox.style.cssText = "display:flex;flex-direction:column;gap:8px"; root.appendChild(nowBox);
+    var upd = el("p", "fwjz-note", "Loading activity…"); root.appendChild(upd);
+    var rf = el("button", "fwjz-btn ghost", "Refresh"); rf.type = "button"; root.appendChild(rf);
+    var cf = el("div", "fwjz-field"), cLb = el("label", null, "Crew size per vehicle"); cLb.htmlFor = "fwjz-crew";
+    var cIn = el("input"); cIn.type = "number"; cIn.id = "fwjz-crew"; cIn.min = 1; cIn.max = 20; cIn.value = j.crewSize || 1;
+    var cRow = el("div", "fwjz-row"), cSv = el("button", "fwjz-btn ghost", "Update crew"); cSv.type = "button";
+    cRow.appendChild(cIn); cRow.appendChild(cSv); cf.appendChild(cLb); cf.appendChild(cRow); root.appendChild(cf);
+    root.appendChild(el("p", "fwjz-note", "Man-hours = time vehicles are inside the zone × crew size. Geotab only knows the driver, so set how many people ride in each vehicle."));
+    var last = null;
+    function fill() {
+      if (!last) return;
+      var active = j.status === "active";
+      vals.veh.textContent = active ? String(last.now.length) : "—";
+      vals.drv.textContent = active ? String(last.nowDrivers) : "—";
+      vals.mh.textContent = (last.rawHours * (j.crewSize || 1)).toFixed(1);
+      nowBox.textContent = "";
+      if (active && last.now.length) {
+        nowBox.appendChild(el("h2", null, "On site now"));
+        last.now.forEach(function (n) {
+          var rw = el("div", "fwjz-card"); rw.style.cssText = "cursor:default;align-items:center";
+          var mt = el("span", "fwjz-meta"); mt.appendChild(el("strong", null, n.vehicle)); mt.appendChild(el("span", "sub", n.driver)); rw.appendChild(mt);
+          rw.appendChild(el("span", "fwjz-stat", "since " + n.since.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })));
+          nowBox.appendChild(rw);
+        });
+      }
+      upd.textContent = "Updated " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) + " · " + last.visitedVeh + " vehicle(s) and " + last.visitedDrv + " driver(s) have been in the zone since the job opened.";
+    }
+    function refreshStats() {
+      track(j).then(function (r) { last = r; fill(); }).catch(function (e) { upd.textContent = ""; msg("Could not load activity: " + errText(e), true); });
+    }
+    rf.addEventListener("click", refreshStats);
+    cSv.addEventListener("click", function () {
+      var n = Math.round(Number(cIn.value));
+      if (!(n >= 1 && n <= 20)) { msg("Crew size must be between 1 and 20.", true); return; }
+      var old = j.crewSize; j.crewSize = n; cSv.disabled = true;
+      saveJob(j).then(function () { cSv.disabled = false; msg(""); fill(); })
+        .catch(function (e) { j.crewSize = old; cSv.disabled = false; msg("Could not save crew size: " + errText(e), true); });
+    });
+    refreshStats();
+    if (j.status === "active") timer = setInterval(refreshStats, 60000);
 
     root.appendChild(el("h2", null, "Zone"));
     root.appendChild(el("div", "sub", shapeText(j)));
