@@ -18,7 +18,7 @@ Both need GitHub Pages turned on (Settings > Pages > branch `main`, folder `/`).
 
 1. **Add jobs and zones** (done): add a job, zone on the map, edit zone size, close job. Each job is a real Geotab zone; job details are saved in the add-in's AddInData.
 2. **Tracking** (done, first version): vehicles and drivers on site now, man-hours since the job opened (time inside the zone × crew size), refreshed every minute. Reads DeviceStatusInfo and Trips. Auto co-driver count still to test.
-3. Inventory assigned to a job and job cost.
+3. **Inventory cost** (done, first version): on a job press **Add item**, fill in name, quantity and cost per unit. Tap an item to edit or delete it. The total feeds the Inventory cost tile. Items are saved with the job. Next: shared item list and labor cost.
 
 Add-in id used for saved jobs: `aJz4Qm8RkT1uWv3Xn6YcP2g`.
 

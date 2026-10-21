@@ -4,7 +4,7 @@ geotab.addin.request = function (elt, service) {
   "use strict";
   var ADDIN_ID = "aJz4Qm8RkT1uWv3Xn6YcP2g";
   var jobs = [], filter = "active", selectedId = null, view = "list";
-  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null;
+  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null, editingItem = null;
 
   var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   var api = function (method, params) { return service.api.call(method, params); };
@@ -82,6 +82,8 @@ geotab.addin.request = function (elt, service) {
     var ft = Math.max((maxLa - minLa) * 111320, (maxLn - minLn) * 111320 * Math.cos(c.lat * Math.PI / 180)) / 0.3048;
     return { center: c, widthFt: Math.max(30, Math.round(ft)) };
   }
+  function money(n) { return "$" + (Math.round(n * 100) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+  function itemsTotal(j) { return (j.items || []).reduce(function (a, i) { return a + i.qty * i.unitCost; }, 0); }
   function whereText(j) { return j.address || (j.existingZone ? "Existing Geotab zone" : "Placed on map"); }
   function shapeText(j) { return j.shape === "custom" ? "Existing zone · custom shape · about " + j.widthFt + " ft across" : (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"; }
 
@@ -145,6 +147,7 @@ geotab.addin.request = function (elt, service) {
   function render() {
     if (view === "add") return renderAdd();
     if (view === "adopt") return renderAdopt();
+    if (view === "item" && byId(selectedId)) return renderItem();
     if (view === "detail" && byId(selectedId)) return renderDetail(byId(selectedId));
     view = "list"; renderList();
   }
@@ -238,6 +241,23 @@ geotab.addin.request = function (elt, service) {
     refreshStats();
     if (j.status === "active") timer = setInterval(refreshStats, 60000);
 
+    var active = j.status === "active", inv = j.items || [];
+    vals.inv.textContent = money(itemsTotal(j)); vals.inv.style.fontSize = "26px";
+    root.appendChild(el("h2", null, "Inventory"));
+    if (!inv.length) root.appendChild(el("div", "fwjz-empty", active ? "No items yet. Add what this job uses to help cover its cost." : "No items."));
+    inv.forEach(function (it) {
+      var c = el("button", "fwjz-card"); c.type = "button"; c.style.alignItems = "center";
+      var mt = el("span", "fwjz-meta"); mt.appendChild(el("strong", null, it.name)); mt.appendChild(el("span", "sub", it.qty + " × " + money(it.unitCost))); c.appendChild(mt);
+      c.appendChild(el("span", "fwjz-stat", money(it.qty * it.unitCost)));
+      if (active) c.addEventListener("click", function () { editingItem = it.id; view = "item"; render(); }); else c.style.cursor = "default";
+      root.appendChild(c);
+    });
+    if (active) {
+      var ai = el("button", "fwjz-btn ghost", "Add item"); ai.type = "button";
+      ai.addEventListener("click", function () { editingItem = null; view = "item"; render(); });
+      root.appendChild(ai);
+    }
+
     root.appendChild(el("h2", null, "Zone"));
     root.appendChild(el("div", "sub", shapeText(j)));
     drawShape(jobPts(j));
@@ -266,6 +286,49 @@ geotab.addin.request = function (elt, service) {
       root.appendChild(cl);
     }
     root.appendChild(signature());
+  }
+
+  function renderItem() {
+    var j = byId(selectedId), it = editingItem ? (j.items || []).filter(function (x) { return x.id === editingItem; })[0] : null;
+    var root = frame(it ? "Edit item" : "Add item");
+    var back = el("button", "fwjz-btn ghost", "‹ Back to job"); back.type = "button";
+    function done() { view = "detail"; editingItem = null; render(); }
+    back.addEventListener("click", done); root.appendChild(back);
+    root.appendChild(el("p", "fwjz-note", "Job: " + j.name));
+    var form = el("form", "fwjz-form");
+    function field(id, label, input) { var f = el("div", "fwjz-field"), l = el("label", null, label); l.htmlFor = id; input.id = id; f.appendChild(l); f.appendChild(input); return f; }
+    var name = el("input"); name.type = "text"; name.placeholder = "e.g. Underlayment roll"; name.value = it ? it.name : "";
+    var qty = el("input"); qty.type = "number"; qty.min = "0.01"; qty.step = "any"; qty.value = it ? it.qty : 1;
+    var cost = el("input"); cost.type = "number"; cost.min = "0"; cost.step = "any"; cost.placeholder = "0.00"; cost.value = it ? it.unitCost : "";
+    form.appendChild(field("fwjz-iname", "Item name", name));
+    form.appendChild(field("fwjz-iqty", "Quantity", qty));
+    form.appendChild(field("fwjz-icost", "Cost per unit ($)", cost));
+    var total = el("p", "fwjz-note"); form.appendChild(total);
+    function showTotal() { var q = Number(qty.value), c = Number(cost.value); total.textContent = "Line total: " + money((q > 0 ? q : 0) * (c > 0 ? c : 0)); }
+    qty.addEventListener("input", showTotal); cost.addEventListener("input", showTotal); showTotal();
+    var row = el("div", "fwjz-row"), cancel = el("button", "fwjz-btn ghost", "Cancel"), save = el("button", "fwjz-btn", "Save item");
+    cancel.type = "button"; save.type = "submit"; cancel.addEventListener("click", done); row.appendChild(cancel); row.appendChild(save); form.appendChild(row);
+    if (it) {
+      var del = el("button", "fwjz-btn ghost", "Delete item"); del.type = "button"; var armed = false;
+      del.addEventListener("click", function () {
+        if (!armed) { armed = true; del.textContent = "Click again to delete"; return; }
+        var prev = j.items; j.items = prev.filter(function (x) { return x.id !== it.id; }); del.disabled = true;
+        saveJob(j).then(done).catch(function (e) { j.items = prev; del.disabled = false; msg("Could not delete the item: " + errText(e), true); });
+      });
+      form.appendChild(del);
+    }
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var n = name.value.trim(), q = Number(qty.value), c = Number(cost.value);
+      if (!n) { msg("Give the item a name.", true); return; }
+      if (!(q > 0)) { msg("Quantity must be more than 0.", true); return; }
+      if (cost.value === "" || !(c >= 0)) { msg("Enter the cost per unit (0 if there is no cost).", true); return; }
+      var prev = j.items ? j.items.slice() : [], rec = { id: it ? it.id : "i" + Date.now(), name: n, qty: q, unitCost: Math.round(c * 100) / 100 };
+      j.items = it ? prev.map(function (x) { return x.id === it.id ? rec : x; }) : prev.concat([rec]);
+      save.disabled = true;
+      saveJob(j).then(done).catch(function (err) { j.items = prev; save.disabled = false; msg("Could not save the item: " + errText(err), true); });
+    });
+    root.appendChild(form); root.appendChild(signature());
   }
 
   function renderAdopt() {
