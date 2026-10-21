@@ -6,6 +6,7 @@ geotab.addin.request = function (elt, service) {
   var jobs = [], filter = "active", selectedId = null, view = "list";
   var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null, timer = null, editingItem = null, period = "week", ovSeq = 0;
 
+  try { elt.style.height = "100%"; elt.style.overflowY = "auto"; } catch (e) { /* host owns the container */ }
   var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   var api = function (method, params) { return service.api.call(method, params); };
   var msg = function (t, isErr) { var m = elt.querySelector(".fwjz-msg"); if (!m) { frame("Job Zones"); m = elt.querySelector(".fwjz-msg"); } m.textContent = t || ""; m.className = "fwjz-msg" + (isErr ? " err" : ""); };
@@ -439,8 +440,8 @@ geotab.addin.request = function (elt, service) {
     var q = el("input"); q.type = "text"; q.id = "fwjz-zq"; q.placeholder = "Zone name";
     f.appendChild(lb); f.appendChild(q); root.appendChild(f);
     var info = el("p", "fwjz-note", "Loading zones…"); root.appendChild(info);
-    var box = el("div"); box.style.cssText = "display:flex;flex-direction:column;gap:8px"; root.appendChild(box);
     var confirm = el("div", "fwjz-form"); root.appendChild(confirm);
+    var box = el("div"); box.style.cssText = "display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;padding:2px"; root.appendChild(box);
     root.appendChild(signature());
     var all = [], picked = null;
 
@@ -477,6 +478,7 @@ geotab.addin.request = function (elt, service) {
           .catch(function (err) { go.disabled = false; msg("Could not save the job: " + errText(err), true); });
       });
       confirm.appendChild(nf); confirm.appendChild(go);
+      if (confirm.scrollIntoView) confirm.scrollIntoView({ block: "nearest" });
     }
     renderAdopt.pick = pick;
     q.addEventListener("input", draw);
