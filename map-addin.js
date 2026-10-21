@@ -196,7 +196,7 @@ geotab.addin.request = function (elt, service) {
     root.appendChild(st); root.appendChild(el("div", "sub", whereText(j)));
 
     var vals = {}, tiles = el("div", "fwjz-tiles");
-    [["veh", "Vehicles on site", "…"], ["drv", "Drivers on site", "…"], ["mh", "Man-hours", "…", 1], ["inv", "Inventory cost", "—"]].forEach(function (t) {
+    [["veh", "Vehicles on site", "…"], ["drv", "Drivers on site", "…"], ["mh", "Man-hours", "…", 1], ["inv", "Inventory cost", "—"], ["lab", "Labor cost", "—"], ["tot", "Job total", "—", 1]].forEach(function (t) {
       var d = el("div", "fwjz-tile" + (t[3] ? " hi" : "")); d.appendChild(el("div", "l", t[1])); vals[t[0]] = el("div", "v", t[2]); d.appendChild(vals[t[0]]); tiles.appendChild(d);
     });
     root.appendChild(tiles);
@@ -208,13 +208,27 @@ geotab.addin.request = function (elt, service) {
     var cRow = el("div", "fwjz-row"), cSv = el("button", "fwjz-btn ghost", "Update crew"); cSv.type = "button";
     cRow.appendChild(cIn); cRow.appendChild(cSv); cf.appendChild(cLb); cf.appendChild(cRow); root.appendChild(cf);
     root.appendChild(el("p", "fwjz-note", "Man-hours = time vehicles are inside the zone × crew size. Geotab only knows the driver, so set how many people ride in each vehicle."));
+    var rf2 = el("div", "fwjz-field"), rLb = el("label", null, "Labor rate per man-hour ($)"); rLb.htmlFor = "fwjz-rate";
+    var rIn = el("input"); rIn.type = "number"; rIn.id = "fwjz-rate"; rIn.min = 0; rIn.step = "any"; rIn.placeholder = "0.00"; rIn.value = j.hourlyRate != null ? j.hourlyRate : "";
+    var rRow = el("div", "fwjz-row"), rSv = el("button", "fwjz-btn ghost", "Update rate"); rSv.type = "button";
+    rRow.appendChild(rIn); rRow.appendChild(rSv); rf2.appendChild(rLb); rf2.appendChild(rRow); root.appendChild(rf2);
+    root.appendChild(el("p", "fwjz-note", "Labor cost = man-hours × this rate. Use your average loaded cost per hour (wages plus burden)."));
     var last = null;
+    function updateCost() {
+      var inv = itemsTotal(j), rate = Number(j.hourlyRate) || 0;
+      vals.inv.textContent = money(inv);
+      if (!last) { vals.lab.textContent = "…"; vals.tot.textContent = "…"; return; }
+      var lab = last.rawHours * (j.crewSize || 1) * rate;
+      vals.lab.textContent = j.hourlyRate == null ? "Set rate" : money(lab);
+      vals.tot.textContent = money(inv + lab);
+    }
     function fill() {
       if (!last) return;
       var active = j.status === "active";
       vals.veh.textContent = active ? String(last.now.length) : "—";
       vals.drv.textContent = active ? String(last.nowDrivers) : "—";
       vals.mh.textContent = (last.rawHours * (j.crewSize || 1)).toFixed(1);
+      updateCost();
       nowBox.textContent = "";
       if (active && last.now.length) {
         nowBox.appendChild(el("h2", null, "On site now"));
@@ -238,11 +252,18 @@ geotab.addin.request = function (elt, service) {
       saveJob(j).then(function () { cSv.disabled = false; msg(""); fill(); })
         .catch(function (e) { j.crewSize = old; cSv.disabled = false; msg("Could not save crew size: " + errText(e), true); });
     });
+    rSv.addEventListener("click", function () {
+      var v = Number(rIn.value);
+      if (rIn.value === "" || !(v >= 0)) { msg("Enter the labor rate per man-hour (0 if there is none).", true); return; }
+      var old = j.hourlyRate; j.hourlyRate = Math.round(v * 100) / 100; rSv.disabled = true;
+      saveJob(j).then(function () { rSv.disabled = false; msg(""); updateCost(); })
+        .catch(function (e) { j.hourlyRate = old; rSv.disabled = false; msg("Could not save the rate: " + errText(e), true); });
+    });
     refreshStats();
     if (j.status === "active") timer = setInterval(refreshStats, 60000);
 
     var active = j.status === "active", inv = j.items || [];
-    vals.inv.textContent = money(itemsTotal(j)); vals.inv.style.fontSize = "26px";
+    vals.inv.style.fontSize = "26px"; vals.lab.style.fontSize = "26px"; vals.tot.style.fontSize = "26px"; updateCost();
     root.appendChild(el("h2", null, "Inventory"));
     if (!inv.length) root.appendChild(el("div", "fwjz-empty", active ? "No items yet. Add what this job uses to help cover its cost." : "No items."));
     inv.forEach(function (it) {
