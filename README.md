@@ -8,6 +8,7 @@ A MyGeotab add-in. Add a job, drop a square or house zone on the map, and (in la
 - Install: Administration > System > System Settings > Add-Ins > New Add-In, paste `map-config.json`.
 - Right-click the map > **Add job here (Fleet Wolf)** to start a job at that spot, or use **Add job** and search an address.
 - Click a job's zone on the map to open that job in the panel.
+- **Use existing zone**: turn a zone you already have in Geotab into a job. Pick it from the list or click it on the map. Its shape stays as drawn (resize it in Geotab Zones).
 
 **2. Activity page (fallback).** `index.html` + `config.json`: a full page under the Activity menu with its own map. Jobs save in the browser when opened standalone.
 

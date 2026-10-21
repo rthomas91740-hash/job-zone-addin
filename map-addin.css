@@ -44,3 +44,4 @@
 .fwjz-shape input{position:absolute;opacity:0;pointer-events:none}
 .fwjz-shape:has(input:checked){border:2px solid #00a8e7;padding:15px}
 .fwjz-shape:has(input:focus-visible){outline:3px solid #00a8e7;outline-offset:2px}
+.fwjz-card.sel{border:2px solid #00a8e7;padding:15px}

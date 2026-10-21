@@ -4,7 +4,7 @@ geotab.addin.request = function (elt, service) {
   "use strict";
   var ADDIN_ID = "aJz4Qm8RkT1uWv3Xn6YcP2g";
   var jobs = [], filter = "active", selectedId = null, view = "list";
-  var draft = null, lastMapLoc = null, shapeEl = null;
+  var draft = null, lastMapLoc = null, shapeEl = null, adoptPre = null;
 
   var el = function (tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
   var api = function (method, params) { return service.api.call(method, params); };
@@ -73,10 +73,23 @@ geotab.addin.request = function (elt, service) {
     });
   }
   function byId(id) { return jobs.filter(function (j) { return j.id === id; })[0]; }
+  function jobPts(j) { return j.points && j.points.length ? j.points : zonePoints(j.center, j.shape, j.widthFt); }
+  function pointsOf(z) { return (z.points || []).map(function (p) { return { lat: p.y, lng: p.x }; }); }
+  function geomOf(pts) {
+    var la = pts.map(function (p) { return p.lat; }), ln = pts.map(function (p) { return p.lng; });
+    var minLa = Math.min.apply(null, la), maxLa = Math.max.apply(null, la), minLn = Math.min.apply(null, ln), maxLn = Math.max.apply(null, ln);
+    var c = { lat: (minLa + maxLa) / 2, lng: (minLn + maxLn) / 2 };
+    var ft = Math.max((maxLa - minLa) * 111320, (maxLn - minLn) * 111320 * Math.cos(c.lat * Math.PI / 180)) / 0.3048;
+    return { center: c, widthFt: Math.max(30, Math.round(ft)) };
+  }
+  function whereText(j) { return j.address || (j.existingZone ? "Existing Geotab zone" : "Placed on map"); }
+  function shapeText(j) { return j.shape === "custom" ? "Existing zone · custom shape · about " + j.widthFt + " ft across" : (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"; }
 
   /* ---------- views ---------- */
   var SQ = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="16" height="16" rx="2"/></svg>';
   var HO = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l8-7 8 7v9H3z"/></svg>';
+  var PL = '<svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 7l7-4 7 5-2 9-8 2z"/></svg>';
+  function iconFor(j) { return j.shape === "house" ? HO : (j.shape === "custom" ? PL : SQ); }
   function frame(title) {
     elt.textContent = "";
     var root = el("div", "fwjz");
@@ -88,6 +101,7 @@ geotab.addin.request = function (elt, service) {
   }
   function render() {
     if (view === "add") return renderAdd();
+    if (view === "adopt") return renderAdopt();
     if (view === "detail" && byId(selectedId)) return renderDetail(byId(selectedId));
     view = "list"; renderList();
   }
@@ -95,9 +109,11 @@ geotab.addin.request = function (elt, service) {
   function renderList() {
     clearShape();
     var root = frame("Job Zones");
-    var add = el("button", "fwjz-btn", "+ Add job"); add.type = "button";
+    var add = el("button", "fwjz-btn", "+ Add job"); add.type = "button"; add.style.flex = "1 1 auto";
     add.addEventListener("click", function () { draft = draft || lastMapLoc; view = "add"; render(); });
-    root.appendChild(add);
+    var ex = el("button", "fwjz-btn ghost", "Use existing zone"); ex.type = "button"; ex.style.flex = "1 1 auto";
+    ex.addEventListener("click", function () { adoptPre = null; view = "adopt"; render(); });
+    var arow = el("div", "fwjz-row"); arow.appendChild(add); arow.appendChild(ex); root.appendChild(arow);
     var tabs = el("div", "fwjz-tabs");
     [["active", "Active"], ["closed", "Closed"], ["all", "All"]].forEach(function (t) {
       var b = el("button", "fwjz-tab", t[1]); b.type = "button"; b.setAttribute("aria-pressed", String(filter === t[0]));
@@ -108,8 +124,8 @@ geotab.addin.request = function (elt, service) {
     if (!vis.length) root.appendChild(el("div", "fwjz-empty", filter === "active" ? "No active jobs yet. Right-click the map and choose Add job here, or use Add job." : "Nothing here yet."));
     vis.forEach(function (j) {
       var c = el("button", "fwjz-card"); c.type = "button";
-      var ic = el("span", "fwjz-ico" + (j.status === "closed" ? " off" : "")); ic.innerHTML = j.shape === "house" ? HO : SQ; c.appendChild(ic);
-      var m = el("span", "fwjz-meta"); m.appendChild(el("strong", null, j.name)); m.appendChild(el("span", "sub", j.address || "Placed on map")); c.appendChild(m);
+      var ic = el("span", "fwjz-ico" + (j.status === "closed" ? " off" : "")); ic.innerHTML = iconFor(j); c.appendChild(ic);
+      var m = el("span", "fwjz-meta"); m.appendChild(el("strong", null, j.name)); m.appendChild(el("span", "sub", whereText(j))); c.appendChild(m);
       var s = el("span", "fwjz-stat"); if (j.status === "active") s.appendChild(el("span", "dot")); s.appendChild(document.createTextNode(j.status === "active" ? "Active" : "Closed")); c.appendChild(s);
       c.addEventListener("click", function () { open(j.id); });
       root.appendChild(c);
@@ -131,7 +147,7 @@ geotab.addin.request = function (elt, service) {
     root.appendChild(back);
     var st = el("div", "fwjz-stat"); if (j.status === "active") st.appendChild(el("span", "dot"));
     st.appendChild(document.createTextNode((j.status === "active" ? "Active since " : "Closed · opened ") + new Date(j.createdAt).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })));
-    root.appendChild(st); root.appendChild(el("div", "sub", j.address || "Placed on map"));
+    root.appendChild(st); root.appendChild(el("div", "sub", whereText(j)));
 
     var tiles = el("div", "fwjz-tiles");
     [["Vehicles on site", "—"], ["Drivers on site", "—"], ["Man-hours", "—", 1], ["Inventory cost", "—"]].forEach(function (t) {
@@ -141,10 +157,10 @@ geotab.addin.request = function (elt, service) {
     root.appendChild(el("p", "fwjz-note", "Vehicle, driver, man-hour and inventory tracking come in the next build step."));
 
     root.appendChild(el("h2", null, "Zone"));
-    root.appendChild(el("div", "sub", (j.shape === "house" ? "House" : "Square") + " · " + j.widthFt + " ft wide"));
-    drawShape(zonePoints(j.center, j.shape, j.widthFt));
+    root.appendChild(el("div", "sub", shapeText(j)));
+    drawShape(jobPts(j));
 
-    if (j.status === "active") {
+    if (j.status === "active" && j.shape !== "custom") {
       var f = el("div", "fwjz-field"), lb = el("label", null, "Zone width (ft)"); lb.htmlFor = "fwjz-size";
       var inp = el("input"); inp.type = "number"; inp.id = "fwjz-size"; inp.min = 30; inp.max = 2000; inp.value = j.widthFt;
       var row = el("div", "fwjz-row"), sv = el("button", "fwjz-btn ghost", "Update size"); sv.type = "button";
@@ -158,6 +174,8 @@ geotab.addin.request = function (elt, service) {
           .catch(function (e) { j.widthFt = old; sv.disabled = false; msg("Could not update the zone: " + errText(e), true); });
       });
       row.appendChild(inp); row.appendChild(sv); f.appendChild(lb); f.appendChild(row); root.appendChild(f);
+    }
+    if (j.status === "active") {
       var cl = el("button", "fwjz-btn", "Close job"); cl.type = "button";
       cl.addEventListener("click", function () {
         j.status = "closed"; j.closedAt = new Date().toISOString();
@@ -166,6 +184,66 @@ geotab.addin.request = function (elt, service) {
       root.appendChild(cl);
     }
     root.appendChild(signature());
+  }
+
+  function renderAdopt() {
+    clearShape();
+    var root = frame("Use existing zone");
+    var back = el("button", "fwjz-btn ghost", "‹ All jobs"); back.type = "button";
+    back.addEventListener("click", function () { view = "list"; adoptPre = null; render(); });
+    root.appendChild(back);
+    root.appendChild(el("p", "fwjz-note", "Pick a zone you already have in Geotab to track as a job, or click it on the map. Its shape stays as drawn."));
+    var f = el("div", "fwjz-field"), lb = el("label", null, "Search your zones"); lb.htmlFor = "fwjz-zq";
+    var q = el("input"); q.type = "text"; q.id = "fwjz-zq"; q.placeholder = "Zone name";
+    f.appendChild(lb); f.appendChild(q); root.appendChild(f);
+    var info = el("p", "fwjz-note", "Loading zones…"); root.appendChild(info);
+    var box = el("div"); box.style.cssText = "display:flex;flex-direction:column;gap:8px"; root.appendChild(box);
+    var confirm = el("div", "fwjz-form"); root.appendChild(confirm);
+    root.appendChild(signature());
+    var all = [], picked = null;
+
+    function draw() {
+      var t = q.value.trim().toLowerCase();
+      var m = all.filter(function (z) { return !t || (z.name || "").toLowerCase().indexOf(t) !== -1; });
+      info.textContent = m.length ? (m.length > 50 ? "Showing the first 50 of " + m.length + ". Search to narrow." : m.length + (m.length === 1 ? " zone" : " zones")) : "No matching zones.";
+      box.textContent = "";
+      m.slice(0, 50).forEach(function (z) {
+        var c = el("button", "fwjz-card" + (picked && picked.id === z.id ? " sel" : "")); c.type = "button";
+        var ic = el("span", "fwjz-ico off"); ic.innerHTML = PL; c.appendChild(ic);
+        var mm = el("span", "fwjz-meta"); mm.appendChild(el("strong", null, z.name || "(unnamed zone)")); c.appendChild(mm);
+        c.addEventListener("click", function () { pick(z.id); });
+        box.appendChild(c);
+      });
+    }
+    function pick(id) {
+      var z = all.filter(function (x) { return x.id === id; })[0];
+      if (!z) { msg("That zone is already a job or could not be found.", true); return; }
+      msg(""); picked = z; draw();
+      var pts = pointsOf(z), g = geomOf(pts); drawShape(pts); zoomTo(g.center, g.widthFt);
+      confirm.textContent = "";
+      var nf = el("div", "fwjz-field"), nl = el("label", null, "Job name"); nl.htmlFor = "fwjz-jn";
+      var ni = el("input"); ni.type = "text"; ni.id = "fwjz-jn"; ni.value = z.name || "";
+      nf.appendChild(nl); nf.appendChild(ni);
+      var go = el("button", "fwjz-btn", "Make this a job"); go.type = "button";
+      go.addEventListener("click", function () {
+        var name = ni.value.trim(); if (!name) { msg("Give the job a name.", true); return; }
+        go.disabled = true;
+        var job = { name: name, address: "", shape: "custom", widthFt: g.widthFt, center: g.center, points: pts, zoneId: z.id,
+          status: "active", createdAt: new Date().toISOString(), existingZone: true };
+        api("Add", { typeName: "AddInData", entity: { addInId: ADDIN_ID, details: job } })
+          .then(function (newId) { job.id = newId; jobs.push(job); filter = "active"; open(job.id); })
+          .catch(function (err) { go.disabled = false; msg("Could not save the job: " + errText(err), true); });
+      });
+      confirm.appendChild(nf); confirm.appendChild(go);
+    }
+    renderAdopt.pick = pick;
+    q.addEventListener("input", draw);
+    api("Get", { typeName: "Zone", resultsLimit: 500 }).then(function (zs) {
+      all = zs.filter(function (z) { return z.points && z.points.length > 2 && !jobs.some(function (j) { return j.zoneId === z.id; }); })
+        .sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+      draw();
+      if (adoptPre) { var id = adoptPre; adoptPre = null; pick(id); }
+    }).catch(function (e) { info.textContent = ""; msg("Could not load zones: " + errText(e), true); });
   }
 
   function renderAdd() {
@@ -240,6 +318,7 @@ geotab.addin.request = function (elt, service) {
     if (e.type === "zone" && e.entity) {
       var j = jobs.filter(function (x) { return x.zoneId === e.entity.id; })[0];
       if (j) open(j.id);
+      else if (view === "adopt" && renderAdopt.pick) renderAdopt.pick(e.entity.id);
     } else {
       var loc = findLatLng(e);
       if (loc) { lastMapLoc = loc; if (view === "add" && renderAdd.setLoc) renderAdd.setLoc(loc); }
