@@ -1,0 +1,15 @@
+{
+  "name": "Job Zones (Map)",
+  "supportEmail": "randy@fleetwolf.com",
+  "version": "0.1.0",
+  "items": [
+    {
+      "page": "map",
+      "title": "Job Zones",
+      "mapScript": {
+        "src": "https://rthomas91740-hash.github.io/job-zone-addin/map-addin.js",
+        "style": "https://rthomas91740-hash.github.io/job-zone-addin/map-addin.css"
+      }
+    }
+  ]
+}
